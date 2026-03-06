@@ -1,0 +1,379 @@
+
+MedExplainer AI
+AI-Powered Personalized Visual Health Explainer
+Technical Workflow & Production Roadmap
+Team
+NPS — Shresht Mishra
+Hackathon
+AWS AI for Bharat 2025
+
+
+
+Table of Contents
+
+
+
+1. Project Overview
+MedExplainer AI is a cloud-native, HIPAA-aligned platform that ingests patient medical reports and generates personalized, multimodal educational videos — combining AI-driven narration, 3D body visualizations, and simplified text — enabling doctors to improve patient comprehension and treatment adherence.
+
+Problem
+Doctors lack time to explain complex conditions; patients forget or misunderstand verbal explanations.
+Solution
+Automatically generate a personalized video explainer from a patient's own medical data using AWS AI services.
+Primary Users
+Doctors (consultation aid) and Patients (self-education post-visit).
+Target Market
+Clinics, hospitals, and telemedicine platforms across India and emerging markets.
+Compliance
+HIPAA-aligned data handling, end-to-end encryption, zero data retention on inference nodes.
+
+
+2. System Architecture
+2.1 High-Level Data Flow
+The system follows a strict unidirectional pipeline to maintain data integrity and patient confidentiality:
+
+End-to-End Pipeline
+Step 1  →  Doctor uploads medical report (PDF / HL7 FHIR / structured lab data)
+Step 2  →  API Gateway + AWS WAF receive request over TLS 1.3
+Step 3  →  Amazon Textract extracts text, tables, and key-value pairs from the report
+Step 4  →  Amazon Comprehend Medical identifies clinical entities (conditions, medications, dosages)
+Step 5  →  Amazon Bedrock (Claude) personalizes explanation — patient age, language, literacy level
+Step 6  →  Amazon Polly synthesizes audio narration in Hindi / English / regional language
+Step 7  →  AWS Lambda orchestrates media stitching (body diagram overlays + narration + text)
+Step 8  →  Amazon S3 (encrypted) stores the generated video temporarily (TTL: 24 hours)
+Step 9  →  Doctor / Patient accesses video via pre-signed S3 URL (time-limited, single-use)
+Step 10 →  Amazon CloudFront delivers video with geo-restriction and signed cookies
+
+2.2 Microservices Architecture
+The backend is decomposed into independently deployable microservices, each running as a containerized workload on Amazon ECS (Fargate):
+
+ingestion-service
+Validates, sanitizes, and routes uploaded medical documents. Enforces file-type whitelist and malware scan via Amazon GuardDuty.
+extraction-service
+Calls Amazon Textract and Comprehend Medical. Normalizes output into a structured JSON schema.
+explanation-service
+Invokes Amazon Bedrock with patient profile context. Generates patient-friendly explanation in requested language.
+media-service
+Stitches narration audio (Polly), body SVG/3D overlays, and text captions into MP4 video via FFmpeg Lambda layer.
+delivery-service
+Generates pre-signed URLs, manages TTL, logs access events to CloudTrail.
+auth-service
+Issues JWT tokens via Amazon Cognito. Handles doctor and patient role-based access control (RBAC).
+
+
+3. AWS Services — Complete Usage Map
+
+AWS Service
+Category
+Purpose in MedExplainer AI
+Amazon Textract
+Document AI
+Extract text, tables, and form fields from uploaded medical PDFs and scanned reports.
+Amazon Comprehend Medical
+NLP / Medical AI
+Detect clinical entities: diagnoses, medications, dosages, anatomy, test results.
+Amazon Bedrock (Claude)
+Foundation Model
+Generate personalized, plain-language patient explanations from clinical entity JSON.
+Amazon Polly
+Text-to-Speech
+Synthesize natural-sounding audio narration in Hindi, English, Tamil, Bengali, and more.
+Amazon S3
+Storage
+Encrypted object storage for uploaded reports (WORM policy) and generated videos (TTL 24h).
+Amazon CloudFront
+CDN / Delivery
+Low-latency video delivery with signed URLs, geo-restrictions, and DDoS protection.
+Amazon API Gateway
+API Management
+REST/WebSocket endpoints with throttling, API key management, and usage plans.
+AWS WAF
+Security
+Block OWASP Top 10 attacks, injection, XSS, and rate-limit abuse on all API endpoints.
+AWS Lambda
+Serverless Compute
+Media orchestration, document routing, pre-signed URL generation, lightweight transforms.
+Amazon ECS (Fargate)
+Container Compute
+Host stateless microservices without managing EC2 servers; auto-scales per traffic.
+Amazon Cognito
+Auth & Identity
+JWT-based auth, MFA support, doctor vs. patient user pools, RBAC enforcement.
+Amazon RDS (Aurora Serverless)
+Relational Database
+Store anonymized metadata: session IDs, report fingerprints, video status, audit logs.
+AWS KMS
+Key Management
+Manage encryption keys for S3 server-side encryption and RDS transparent data encryption.
+AWS CloudTrail
+Audit Logging
+Immutable audit trail of all data access, API calls, and user actions for compliance.
+Amazon CloudWatch
+Observability
+Metrics, logs, dashboards, and alarms for all services. Anomaly detection on access patterns.
+AWS Shield Standard
+DDoS Protection
+Always-on DDoS protection for API Gateway and CloudFront endpoints.
+Amazon GuardDuty
+Threat Detection
+Detect malicious file uploads, anomalous API calls, and credential compromise.
+AWS Secrets Manager
+Credential Management
+Rotate and inject API keys, DB credentials, and third-party secrets at runtime.
+Amazon VPC
+Network Isolation
+Private subnets for all compute; NAT Gateway for outbound; no public IPs on services.
+AWS IAM
+Permissions
+Least-privilege roles per service; no wildcard permissions; cross-account denied.
+AWS Step Functions
+Workflow Orchestration
+Coordinate multi-step pipeline (extract → explain → generate → deliver) with retry logic.
+Amazon SES
+Email Notifications
+Send secure video-ready notifications to doctors with time-limited access links.
+AWS Cost Explorer
+Cost Management
+Track credit usage across services; set budget alerts for hackathon credit ceiling.
+
+
+4. Security & Confidentiality Architecture
+Given the sensitive nature of medical data, security is a first-class design concern — not an afterthought. Every layer of the stack applies the principle of least privilege, zero trust, and defence-in-depth.
+
+4.1 Data Encryption
+In Transit
+TLS 1.3 enforced on all endpoints. HTTPS-only policy on CloudFront. API Gateway rejects HTTP connections.
+At Rest (S3)
+AES-256 server-side encryption via AWS KMS CMK. Bucket versioning + Object Lock (WORM) on medical reports.
+At Rest (DB)
+Amazon Aurora Transparent Data Encryption (TDE) using KMS-managed keys.
+Key Rotation
+KMS keys auto-rotated annually. Secrets Manager rotates DB credentials every 30 days.
+
+4.2 Access Control
+Amazon Cognito user pools: separate pools for Doctors and Patients with different permission scopes.
+Role-Based Access Control (RBAC): doctors can upload + view; patients can view only their own video.
+Pre-signed S3 URLs: time-limited (1 hour), IP-bound, single-use — video never directly exposed.
+IAM roles follow least-privilege: each Lambda/ECS service has only the permissions it needs.
+No cross-service wildcard policies (no s3:* or iam:*); all resources are scoped by ARN.
+
+4.3 Network Security
+All compute (ECS, Lambda, RDS) runs inside a private VPC subnet — no public IP addresses.
+AWS WAF on API Gateway: blocks SQL injection, XSS, path traversal, and rate-limits each IP to 100 req/min.
+AWS Shield Standard: always-on DDoS protection for public-facing endpoints.
+Amazon GuardDuty: continuous threat intelligence, anomaly detection on API patterns and S3 access.
+VPC Flow Logs + CloudTrail: every network event and API call is logged and immutable.
+
+4.4 Data Minimization & Retention
+Patient Data Handling Policy
+• Medical reports are stored encrypted in S3 for processing only — deleted after 7 days (configurable lifecycle rule).
+• Generated videos are ephemeral — TTL of 24 hours; automatically expired by S3 lifecycle policy.
+• Amazon Bedrock inference: NO persistent storage of patient data on model endpoints (on-demand mode).
+• Amazon Comprehend Medical: API call only — no training on patient data.
+• RDS stores only anonymized metadata (session IDs, hashed report fingerprints) — never raw PII.
+• Patients are identified by session token only; no name/DOB stored in application database.
+
+4.5 Audit & Compliance
+AWS CloudTrail: every API call (who, what, when, from where) stored in a separate, tamper-proof S3 bucket.
+Amazon CloudWatch Alarms: alert on unauthorized access attempts, unusual data volume, and failed auth.
+Security Hub: centralized compliance dashboard covering CIS AWS Foundations Benchmark.
+HIPAA alignment: architecture follows AWS HIPAA Eligible Services guidelines and BAA requirements.
+
+
+5. Backend Tech Stack
+5.1 API & Microservices Layer
+Language
+Python 3.12 (primary) — mature AWS SDK (boto3), rich ML ecosystem, fast Lambda cold starts.
+Framework
+FastAPI — async, OpenAPI schema auto-generation, Pydantic validation, lightweight for Lambda/ECS.
+Containerization
+Docker + Amazon ECR. Each microservice is a separate image, pinned to digest for reproducibility.
+Orchestration
+Amazon ECS (Fargate) for long-running services; AWS Lambda for event-driven, short-lived tasks.
+Pipeline Orchestration
+AWS Step Functions (Express Workflows) to coordinate the 10-step processing pipeline with retries.
+Message Queue
+Amazon SQS (FIFO queue) for async video generation jobs — decouples upload from processing.
+
+5.2 AI / ML Stack
+Document Extraction
+Amazon Textract — handles scanned PDFs, handwritten notes, lab report tables, and forms.
+Medical NLP
+Amazon Comprehend Medical — detects ICD-10 conditions, RxNorm medications, anatomy, test values.
+Language Generation
+Amazon Bedrock with Anthropic Claude 3 Sonnet — personalized explanation with patient context.
+Text-to-Speech
+Amazon Polly (Neural TTS) — natural prosody in 10+ Indian languages including Hindi, Tamil, Bengali.
+Video Assembly
+FFmpeg via AWS Lambda layer — overlays audio, SVG body diagrams, animated captions → MP4.
+Language Detection
+Amazon Comprehend — auto-detects language of uploaded report to select correct output language.
+
+5.3 Frontend
+Framework
+React 18 + TypeScript — component-based, type-safe, maintainable.
+Hosting
+Amazon S3 (static hosting) + Amazon CloudFront — globally distributed, fast load times across India.
+Auth UI
+AWS Amplify Auth (Cognito integration) — drop-in login/MFA components.
+Video Player
+Video.js — plays CloudFront-delivered MP4 with subtitle track support for text captions.
+UI Library
+Tailwind CSS + shadcn/ui — accessible, responsive design without heavy dependencies.
+
+5.4 CI/CD & Infrastructure as Code
+IaC
+AWS CDK (TypeScript) — define all infrastructure as code; version-controlled, reproducible deployments.
+CI/CD Pipeline
+AWS CodePipeline + CodeBuild — automated build, test, security scan, and deploy on every git push.
+Container Registry
+Amazon ECR — stores Docker images; image scanning enabled for CVE detection.
+Secrets
+AWS Secrets Manager + Parameter Store — no credentials in code or environment variables.
+Environments
+Three environments: dev, staging, prod — each in isolated VPC; prod requires manual approval gate.
+
+
+6. Production Readiness Checklist
+6.1 Scalability
+ECS Fargate auto-scales based on CPU/memory; Target Tracking Scaling Policy configured.
+SQS queue buffers video generation jobs — system handles traffic spikes without data loss.
+CloudFront caches static assets; S3 scales infinitely for video storage.
+Amazon Aurora Serverless v2 auto-scales DB capacity from 0.5 to 64 ACUs.
+
+6.2 Reliability & High Availability
+Multi-AZ deployment: ECS tasks and RDS replicas across 2+ Availability Zones.
+Step Functions retry policies: automatic retry with exponential backoff on transient failures.
+Dead-letter queues (DLQ) on SQS: failed jobs captured for manual review without data loss.
+Health checks on all ECS services; unhealthy containers auto-replaced by Fargate.
+
+6.3 Observability
+Structured JSON logging from all services — queryable via CloudWatch Logs Insights.
+Distributed tracing via AWS X-Ray — end-to-end latency visibility across the entire pipeline.
+Business metrics dashboard: videos generated/day, avg. processing time, error rate, language breakdown.
+PagerDuty / SNS alerts on P0 alarms (pipeline failure, auth anomaly, error rate > 1%).
+
+6.4 Cost Management for AWS Credits
+AWS Credits Strategy
+• Use Bedrock on-demand pricing — no provisioned throughput commitment needed at hackathon scale.
+• Lambda + Fargate Spot: use Spot capacity for media-service tasks (80% cost saving on video generation).
+• S3 Intelligent-Tiering: auto-move rarely accessed objects to cheaper storage tiers.
+• CloudFront Free Tier: first 1 TB/month data transfer free — sufficient for demo scale.
+• Set AWS Budgets alert at 80% of credit balance to avoid overspend.
+• Aurora Serverless v2 scales to 0 during idle periods — no cost when not processing.
+
+
+7. Phased Development Roadmap
+
+Phase
+Timeline
+Deliverables
+AWS Services
+Phase 1
+Week 1–2
+Core extraction pipeline: Textract + Comprehend Medical → structured JSON. Unit tests.
+Textract, Comprehend Medical, S3, Lambda, IAM, VPC
+Phase 2
+Week 3–4
+AI explanation layer: Bedrock integration, prompt engineering, multi-language output, Polly TTS.
+Bedrock (Claude), Polly, Comprehend, Secrets Manager
+Phase 3
+Week 5–6
+Video assembly: FFmpeg Lambda layer, body diagram overlays, subtitle track, MP4 output.
+Lambda, S3, ECS Fargate, SQS, Step Functions
+Phase 4
+Week 7–8
+Auth, security hardening: Cognito, WAF rules, KMS encryption, GuardDuty, CloudTrail.
+Cognito, WAF, KMS, GuardDuty, CloudTrail, Shield
+Phase 5
+Week 9–10
+Frontend (React), CloudFront delivery, pre-signed URLs, doctor & patient dashboards.
+CloudFront, S3 (hosting), Amplify, API Gateway
+Phase 6
+Week 11–12
+CI/CD pipeline, CDK IaC, staging environment, load testing, security pen test, demo prep.
+CodePipeline, CodeBuild, ECR, X-Ray, CloudWatch
+
+
+8. API Design (Key Endpoints)
+
+POST /reports/upload
+Doctor uploads medical report. Returns job_id for async processing. File validated, scanned, encrypted before storage.
+GET /jobs/{job_id}/status
+Poll processing status: QUEUED → EXTRACTING → GENERATING → ASSEMBLING → READY → EXPIRED.
+GET /videos/{video_id}/url
+Returns time-limited (1h), IP-bound pre-signed URL to access generated video. Auth required.
+POST /patients/{id}/profile
+Set patient language preference, age group, and literacy level for personalized explanation.
+GET /audit/logs
+Admin-only: retrieve CloudTrail events for a given patient session. Compliance endpoint.
+DELETE /reports/{id}
+Manually trigger early deletion of a report before the 7-day TTL. Compliance right-to-erasure.
+
+9. Amazon Bedrock — Prompt Engineering Strategy
+The quality of patient explanation depends heavily on prompt design. We use a structured system prompt + dynamic user prompt approach:
+
+System Prompt (fixed — loaded from Secrets Manager)
+You are a compassionate medical educator. Your task is to explain a patient's medical condition in simple,
+clear language that a person with no medical background can understand. Always:
+  • Use everyday analogies to explain body parts or processes.
+  • Avoid medical jargon; if you must use a term, define it immediately.
+  • Structure your explanation in 3 parts: What is happening, Why it matters, What to do next.
+  • Keep the tone warm, reassuring, and factual. Never cause unnecessary alarm.
+  • Output in the requested language. Target reading level: Grade 6.
+
+Dynamic User Prompt (generated per patient)
+Patient Profile: Age 45, Language: Hindi, Literacy Level: Basic
+Clinical Findings (from Comprehend Medical):
+  - Condition: Type 2 Diabetes Mellitus (HbA1c: 8.2%)
+  - Medication: Metformin 500mg twice daily
+  - Lab: Fasting blood glucose 210 mg/dL (normal: 70-100)
+
+Generate a personalized explanation following the 3-part structure above.
+Include one simple analogy for blood sugar regulation.
+Output format: JSON with keys: what_is_happening, why_it_matters, what_to_do, analogy, audio_script
+
+
+10. AWS Credits Justification
+The following services justify the AWS credit request for building, testing, and demonstrating MedExplainer AI at production-grade quality:
+
+AWS Service
+Category
+Purpose in MedExplainer AI
+Amazon Bedrock
+Core AI
+High-value LLM inference for personalized explanations — primary credit consumer.
+Amazon Textract
+Document AI
+Per-page pricing for medical report extraction across test dataset.
+Amazon Comprehend Medical
+Medical NLP
+Per-character pricing for clinical entity detection.
+Amazon Polly (Neural)
+TTS
+Neural TTS voices for Indian languages — higher quality, higher cost than standard.
+Amazon ECS Fargate
+Compute
+Running 6 microservices in a private VPC for the demo duration.
+Amazon RDS Aurora
+Database
+Serverless v2 cluster for metadata storage and audit logging.
+AWS Step Functions
+Orchestration
+Express workflow executions per video generation job.
+CloudFront + S3
+Delivery
+Storage and delivery of demo videos and the React frontend.
+
+Social Impact Justification for AWS AI for Bharat
+• Addresses healthcare communication gap in India — over 1.4 billion people, majority in Tier 2/3 cities.
+• Supports 10+ Indian languages via Amazon Polly Neural TTS — true accessibility for diverse populations.
+• Reduces doctor consultation time by up to 40% (estimated) by automating the explanation step.
+• Improves treatment adherence — patients who understand their condition are 2x more likely to follow treatment.
+• Telemedicine-ready: integrates directly into existing platforms via REST API with no UI dependency.
+• Scalable to government health schemes (Ayushman Bharat) and rural health workers (ASHA workers).
+
+
+Built for AWS AI for Bharat Hackathon 2025
+Team NPS  |  Shresht Mishra
+MedExplainer AI — Personalized Visual Health Explainer
